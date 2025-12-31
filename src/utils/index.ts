@@ -1,26 +1,38 @@
 import { ObjectId } from 'mongodb';
-import { logger } from '../logger';
 
 export function safeCallback(callback: any, ...args: any[]) {
     if (!callback) return;
     callback(...args);
 }
 
-export function safeObjectArgument(object: any) {
+function containsOperatorKeys(value: any): boolean {
+    if (!value || typeof value !== "object") return false;
+    if (Array.isArray(value)) {
+        return value.some((item) => containsOperatorKeys(item));
+    }
+    for (const key of Object.keys(value)) {
+        if (key.startsWith("$")) return true;
+        if (containsOperatorKeys(value[key])) return true;
+    }
+    return false;
+}
+
+export function safeObjectArgument(object: any, options: { allowOperators?: boolean } = {}) {
     if (!object) return {};
     if (Array.isArray(object)) {
         if (object.length === 0) return {};
         if (!(typeof object[0] === "string" && Array.isArray(object[1]))) return object;
 
         let jsonString = object[0];
-        let parameters = object[1];
+        const parameters = object[1];
         const placeholders = jsonString.split('?').length - 1;
         if (placeholders !== parameters.length) {
             throw new Error("Number of placeholders does not match number of parameters");
         }
         for (let i = 0; i < placeholders; i++) {
             const parameter = parameters[i];
-            jsonString = jsonString.replace('?', parameter);
+            const serialized = JSON.stringify(parameter);
+            jsonString = jsonString.replace('?', serialized);
         }
         try {
             object = JSON.parse(jsonString);
@@ -29,6 +41,9 @@ export function safeObjectArgument(object: any) {
         }
     }
     if (typeof object !== "object") return {};
+    if (!options.allowOperators && containsOperatorKeys(object)) {
+        throw new Error("Operator keys are not allowed in this context");
+    }
     if (object._id) object._id = new ObjectId(object._id);
     return object;
 }
